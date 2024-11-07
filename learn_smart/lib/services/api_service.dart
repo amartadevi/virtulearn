@@ -9,6 +9,7 @@ import '../models/enrollment.dart';
 import '../models/module.dart';
 import '../models/note.dart';
 import '../models/quiz.dart';
+import '../models/chatbot_message.dart';
 
 class ApiService {
   final String baseUrl;
@@ -655,5 +656,57 @@ Future<Map<String, dynamic>> generateQuizFromMultipleNotes(
     }
   }
 
+  Future<String> getChatbotResponse(String message) async {
+    try {
+      final response = await _performHttpRequest(
+        url: baseUrl + 'chatbot/',
+        requestType: 'POST',
+        body: {
+          'message': message,
+        },
+      );
 
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        return responseData['response'];
+      } else {
+        throw Exception('Failed to get chatbot response');
+      }
+    } catch (e) {
+      throw Exception('Error communicating with AI: $e');
+    }
+  }
+
+  Future<List<ChatbotMessage>> getChatbotHistory() async {
+    try {
+      final response = await _performHttpRequest(
+        url: baseUrl + 'chatbot/history/',
+        requestType: 'GET',
+      );
+      
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        return data.map((json) => ChatbotMessage.fromJson(json)).toList();
+      } else {
+        throw Exception('Failed to get chatbot history');
+      }
+    } catch (e) {
+      throw Exception('Error fetching chatbot history: $e');
+    }
+  }
+
+  Future<void> clearChatbotHistory() async {
+    try {
+      final response = await _performHttpRequest(
+        url: baseUrl + 'chatbot/clear/',
+        requestType: 'DELETE',
+      );
+      
+      if (response.statusCode != 204) {
+        throw Exception('Failed to clear chatbot history');
+      }
+    } catch (e) {
+      throw Exception('Error clearing chatbot history: $e');
+    }
+  }
 }

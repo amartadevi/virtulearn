@@ -5,6 +5,7 @@ import 'package:learn_smart/view_models/auth_view_model.dart';
 import 'package:learn_smart/screens/widgets/app_bar.dart';
 import 'package:learn_smart/screens/widgets/bottom_navigation.dart'; // Import the BottomNavigation widget
 import 'package:motion_tab_bar_v2/motion-tab-controller.dart'; // Import for the tab bar controller
+import 'package:learn_smart/screens/chat_screen.dart';
 
 import '../models/enrollment.dart';
 
@@ -114,10 +115,23 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                   ? const Center(child: Text('No Updates Yet'))
                   : _buildNotificationsList(),
       bottomNavigationBar: BottomNavigation(
-        // Add the BottomNavigation bar here
         controller: _motionTabBarController,
         currentIndex: _selectedIndex,
       ),
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 16.0, right: 16.0),
+        child: FloatingActionButton(
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => ChatScreen()),
+            );
+          },
+          child: const Icon(Icons.chat_bubble),
+          backgroundColor: Colors.blue,
+        ),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 

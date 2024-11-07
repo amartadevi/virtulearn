@@ -84,18 +84,16 @@ class _QuizDetailScreenState extends State<QuizDetailScreen> {
         quiz = Quiz(
           id: -1,
           title: widget.generatedQuiz!['title'] ?? 'Generated Quiz',
-          content: content.toString(),
+          content: content?.toString() ?? '',
           isAIGenerated: true,
           isSaved: false,
         );
 
-        debugPrint('Parsing quiz content: ${quiz.content}');
-        _parseQuizContent(quiz.content);
-        
-        if (!widget.isEditMode && isStudent) {
-          _startTimer();
+       if (content != null) {
+          _parseQuizContent(content.toString());
+          if (!widget.isEditMode && isStudent) _startTimer();
         }
-      } else {
+      }else {
         final response = await _apiService.getQuizDetail(widget.moduleId, widget.quizId);
         quiz = response;
         
@@ -137,44 +135,75 @@ class _QuizDetailScreenState extends State<QuizDetailScreen> {
     });
   }
 
-  void _parseQuizContent(String content) {
-    List<String> questionBlocks = content.split("\n\n");
-    parsedQuestions.clear(); // Clear existing questions
+void _parseQuizContent(String? content) {
+    if (content == null || content.isEmpty) {
+      print('Content is null or empty');
+      return;
+    }
 
-    for (var block in questionBlocks) {
-      List<String> lines = block.trim().split("\n");
-      if (lines.length >= 4) { // Changed condition to handle varying number of options
-        String questionText = lines[0].trim();
-        List<String> options = [];
-        String correctAnswer = '';
+    try {
+      parsedQuestions.clear();
+      
+      // Split by question numbers (1., 2., etc.)
+      List<String> blocks = content.split(RegExp(r'\d+\.\s+'));
+      
+      // Skip the first empty block if exists
+      for (String block in blocks.skip(1)) {
+        if (block.trim().isEmpty) continue;
 
-        // Extract options and correct answer
-        for (int i = 1; i < lines.length; i++) {
-          String line = lines[i].trim();
-          if (line.startsWith('Correct Answer:')) {
-            correctAnswer = _extractCorrectAnswer(line);
-            break;
-          } else if (line.isNotEmpty) {
-            options.add(line);
+        // Split block into lines and clean up
+        List<String> lines = block
+            .split('\n')
+            .map((line) => line.trim())
+            .where((line) => line.isNotEmpty)
+            .toList();
+
+        if (lines.length >= 5) { // Question + 4 options + correct answer
+          String questionText = lines[0].trim();
+          List<String> options = [];
+          String correctAnswer = '';
+
+          // Process each line
+          for (String line in lines.skip(1)) { // Skip question text
+            if (line.startsWith(RegExp(r'[A-D]\)'))) {
+              // Extract option text (remove A), B), etc.)
+              String optionText = line.substring(2).trim();
+              options.add(optionText);
+            } else if (line.startsWith('Correct Answer:')) {
+              correctAnswer = line.split(':')[1].trim();
+            }
+          }
+
+          // Add question if we have all components
+          if (options.length == 4 && correctAnswer.isNotEmpty) {
+            parsedQuestions.add({
+              'question': questionText,
+              'options': options,
+              'correctAnswer': correctAnswer,
+            });
+
+            print('Added Question: $questionText');
+            print('Options: $options');
+            print('Correct Answer: $correctAnswer');
           }
         }
-
-        // Only add the question if we have both options and a correct answer
-        if (options.isNotEmpty && correctAnswer.isNotEmpty) {
-          parsedQuestions.add({
-            'question': questionText,
-            'options': options,
-            'correctAnswer': correctAnswer,
-          });
-        }
       }
-    }
-  }
 
-  String _extractCorrectAnswer(String line) {
-    final correctAnswerPattern = RegExp(r'Correct Answer:\s*([A-D])');
-    final match = correctAnswerPattern.firstMatch(line);
-    return match?.group(1) ?? '';
+      print('Total parsed questions: ${parsedQuestions.length}');
+
+      // Update UI
+      setState(() {
+        isGeneratedQuiz = widget.generatedQuiz != null;
+      });
+
+    } catch (e) {
+      print('Error parsing quiz content: $e');
+      // Show error in UI
+      setState(() {
+        _hasError = true;
+        _errorMessage = 'Failed to parse quiz content: $e';
+      });
+    }
   }
 
   // Helper method to convert option letter to index
@@ -591,7 +620,7 @@ class _QuizDetailScreenState extends State<QuizDetailScreen> {
       Map<String, dynamic> quizData = {
         'title': quiz.title ?? '',
         'content': quiz.content ?? '',
-        'note_ids': widget.generatedQuiz?['note_ids'] ?? [], // Include note IDs
+        // 'note_ids': widget.generatedQuiz?['note_ids'] ?? [], // Include note IDs
       };
       
       await _apiService.saveAIQuiz(
@@ -614,21 +643,10 @@ class _QuizDetailScreenState extends State<QuizDetailScreen> {
   }
 
   Future<void> _regenerateQuiz() async {
-    if (isSaved) {
-      _showErrorSnackBar('Cannot regenerate a saved quiz');
-      return;
-    }
-
     try {
-      if (!mounted) return; // Check if widget is still mounted
-      setState(() {
-        _isLoading = true;
-        // Clear existing quiz data
-        selectedAnswer = '';
-        selectedAnswers.clear();
-        currentQuestionIndex = 0;
-      });
+      setState(() => _isLoading = true);
       
+      // Get note IDs from the current quiz
       List<int> noteIds = [];
       if (widget.generatedQuiz != null && widget.generatedQuiz!['note_ids'] != null) {
         noteIds = List<int>.from(widget.generatedQuiz!['note_ids']);
@@ -640,37 +658,26 @@ class _QuizDetailScreenState extends State<QuizDetailScreen> {
       
       debugPrint('Regenerating quiz with note IDs: $noteIds');
       
+      // Use the existing generateQuizFromMultipleNotes method
       final response = await _apiService.generateQuizFromMultipleNotes(
         widget.moduleId,
         noteIds,
       );
 
-      if (!mounted) return; // Check again after async operation
-
-      // Update quiz with new content
-      quiz = Quiz(
-        id: -1,
-        title: response['title'] ?? 'Generated Quiz',
-        content: response['quiz_content'] ?? response['content'] ?? '',
-        isAIGenerated: true,
-        isSaved: false,
-      );
-      
-      // Parse new quiz content
-      if (quiz.content != null) {
-        _parseQuizContent(quiz.content!);
-      }
-      
-      if (!mounted) return; // Final mounted check before setState
       setState(() {
-        isExplicitlySaved = false;
-        isSaved = false;
-        _isLoading = false;
+        quiz = Quiz(
+          id: widget.quizId,
+          title: response['title'],
+          content: response['content'],
+          isAIGenerated: true,
+          isSaved: false,
+        );
+        _parseQuizContent(quiz.content);
       });
     } catch (e) {
-      if (!mounted) return;
-      setState(() => _isLoading = false);
       _showErrorSnackBar(e.toString());
+    } finally {
+      setState(() => _isLoading = false);
     }
   }
 
