@@ -519,32 +519,93 @@ Future<Map<String, dynamic>> generateQuizFromMultipleNotes(
   List<int> noteIds,
 ) async {
   try {
-    debugPrint('Generating quiz for notes $noteIds in module $moduleId');
+     if (noteIds.length < 2) {
+      throw Exception('Please select at least 2 notes to generate a quiz');
+    }
+    debugPrint('Generating quiz for notes: $noteIds');
     
     final response = await _performHttpRequest(
       url: baseUrl + 'modules/$moduleId/notes/generate-quiz/',
       requestType: 'POST',
       body: {
         'note_ids': noteIds,
+        'is_ai_generated': true,
       },
     );
 
-    if (response.statusCode == 201) {
+    debugPrint('Generate Response: ${response.body}');
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
       final responseData = json.decode(response.body);
+      
+      final String content = responseData['quiz_content'] ?? 
+                           responseData['content'] ?? 
+                           responseData['generated_content'] ?? '';
+                           
+      if (content.isEmpty || content.contains('Model not found')) {
+        throw Exception('Failed to generate quiz. Please try with fewer or shorter notes.');
+      }
+
       return {
         'title': responseData['title'] ?? 'Generated Quiz',
-        'content': responseData['quiz_content'] ?? responseData['content'],
-        'note_ids': noteIds, // Preserve note IDs for regeneration
+        'content': content,
+        'note_ids': noteIds,
         'is_ai_generated': true,
         'is_saved': false,
       };
     } else {
       final errorData = json.decode(response.body);
-      throw Exception(errorData['error'] ?? 'Failed to generate quiz');
+      throw Exception(errorData['detail'] ?? 'Failed to generate quiz');
     }
   } catch (e) {
     debugPrint('Error generating quiz: $e');
-    throw Exception(e.toString());
+    throw Exception('Failed to generate quiz: $e');
+  }
+}
+
+// Add a helper method to fetch the latest generated quiz
+Future<Map<String, dynamic>> getLatestGeneratedQuiz(
+  int moduleId, 
+  List<int> noteIds,
+) async {
+  try {
+    final response = await _performHttpRequest(
+      url: baseUrl + 'modules/$moduleId/notes/generate-quiz/',
+      requestType: 'POST',
+      body: {
+        'note_ids': noteIds,
+        'is_ai_generated': true,
+        'regenerate': true,
+      },
+    );
+
+    debugPrint('Fetch Generated Quiz Response: ${response.body}');
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      final responseData = json.decode(response.body);
+      
+      final String content = responseData['quiz_content'] ?? 
+                           responseData['content'] ?? 
+                           responseData['generated_content'] ?? '';
+                           
+      if (content.isEmpty) {
+        throw Exception('Generated quiz content is empty');
+      }
+
+      return {
+        'title': responseData['title'] ?? 'Generated Quiz',
+        'content': content,
+        'note_ids': noteIds,
+        'is_ai_generated': true,
+        'is_saved': false,
+      };
+    } else {
+      final errorData = json.decode(response.body);
+      throw Exception(errorData['detail'] ?? 'Failed to fetch generated quiz');
+    }
+  } catch (e) {
+    debugPrint('Error fetching generated quiz: $e');
+    throw Exception('Failed to fetch generated quiz: $e');
   }
 }
 
@@ -627,32 +688,31 @@ Future<Map<String, dynamic>> generateQuizFromMultipleNotes(
     await fetchNotes(moduleId);
   }
 
-  Future<void> saveAIQuiz(
-    int moduleId,
-    Map<String, dynamic> quizData,
-  ) async {
+  Future<void> saveAIQuiz(int moduleId, Map<String, dynamic> quizData) async {
     try {
-      debugPrint('Saving quiz data: $quizData');
-      
       final response = await _performHttpRequest(
         url: baseUrl + 'modules/$moduleId/quizzes/',
         requestType: 'POST',
         body: {
           'title': quizData['title'],
           'content': quizData['content'],
-          'module': moduleId,
           'is_ai_generated': true,
-          'note_ids': quizData['note_ids'] ?? [], // Include note IDs in save
+          'module': moduleId,
+          'note_ids': quizData['note_ids'],
+          'quiz_type': 'practice',
+          'category': 'MCQ',
         },
       );
 
       if (response.statusCode != 201) {
         final errorData = json.decode(response.body);
-        throw Exception(errorData['detail'] ?? 'Failed to save quiz');
+        throw Exception(errorData['detail'] ?? 'Failed to save AI quiz');
       }
+
+      debugPrint('AI Quiz saved successfully');
     } catch (e) {
-      debugPrint('Error saving quiz: $e');
-      throw Exception('Failed to save quiz: ${e.toString()}');
+      debugPrint('Error saving AI quiz: $e');
+      throw Exception('Failed to save AI quiz: $e');
     }
   }
 
@@ -707,6 +767,108 @@ Future<Map<String, dynamic>> generateQuizFromMultipleNotes(
       }
     } catch (e) {
       throw Exception('Error clearing chatbot history: $e');
+    }
+  }
+   Future<void> submitQuizResult({
+    required int moduleId,
+    required int quizId,
+    required double percentage,
+    required String quizContent,
+  }) async {
+    // Fix the URL format to match Django's URL pattern
+    final url = baseUrl + 'modules/$moduleId/quizzes/$quizId/results/';
+
+    try {
+      final response = await _performHttpRequest(
+        url: url,
+        requestType: 'POST',
+        body: {
+          'quiz': quizId,
+          'module': moduleId,
+          'percentage': percentage,
+          'quiz_content': quizContent,
+        },
+      );
+
+      debugPrint('Quiz submission response: ${response.statusCode}');
+      debugPrint('Response body: ${response.body}');
+
+      if (response.statusCode != 201) {
+        final responseText = response.body;
+        debugPrint('Failed to submit quiz: $responseText');
+        
+        if (responseText.contains('<!DOCTYPE html>')) {
+          throw Exception('Server error. Please try again later.');
+        }
+        
+        try {
+          final errorData = json.decode(responseText);
+          if (errorData['code'] == 'duplicate_submission') {
+            throw Exception('You have already submitted this quiz.');
+          }
+          throw Exception(errorData['detail'] ?? 'Failed to submit quiz result');
+        } catch (e) {
+          throw Exception('Failed to submit quiz result. Please try again.');
+        }
+      }
+    } catch (e) {
+      debugPrint('Error submitting quiz result: $e');
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> getQuizResult(int quizId) async {
+    try {
+      final response = await _performHttpRequest(
+        url: baseUrl + 'quizzes/$quizId/result/',
+        requestType: 'GET',
+      );
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      } else {
+        throw Exception('Failed to fetch quiz result');
+      }
+    } catch (e) {
+      debugPrint('Error fetching quiz result: $e');
+      throw Exception('Error fetching quiz result');
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getQuizLeaderboard(int quizId) async {
+    try {
+      final response = await _performHttpRequest(
+        url: baseUrl + 'quizzes/$quizId/leaderboard/',
+        requestType: 'GET',
+      );
+
+      if (response.statusCode == 200) {
+        List<dynamic> data = json.decode(response.body);
+        return List<Map<String, dynamic>>.from(data);
+      } else {
+        throw Exception('Failed to fetch quiz leaderboard');
+      }
+    } catch (e) {
+      debugPrint('Error fetching quiz leaderboard: $e');
+      throw Exception('Error fetching quiz leaderboard');
+    }
+  }
+
+  Future<Map<String, dynamic>> getStudentQuizResults(int moduleId) async {
+    try {
+      final response = await _performHttpRequest(
+        url: baseUrl + 'modules/$moduleId/results/',
+        requestType: 'GET',
+      );
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      } else {
+        throw Exception('Failed to fetch student quiz results');
+      }
+    } catch (e) {
+      debugPrint('Error fetching student quiz results: $e');
+      throw Exception('Error fetching student quiz results');
     }
   }
 }

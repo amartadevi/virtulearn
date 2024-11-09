@@ -37,7 +37,7 @@ class _ModuleDetailScreenState extends State<ModuleDetailScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final authViewModel = Provider.of<AuthViewModel>(context, listen: false);
       _apiService = ApiService(baseUrl: 'http://10.0.2.2:8000/api/');
@@ -115,46 +115,57 @@ class _ModuleDetailScreenState extends State<ModuleDetailScreen>
     }
   }
 
-  Future<void> _generateQuiz() async {
-    try {
-      if (_selectedNoteIds.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Please select at least one note')),
-        );
-        return;
-      }
-
-      setState(() => _isLoading = true);
-      
-      final quizData = await _apiService.generateQuizFromMultipleNotes(
-        widget.moduleId,
-        _selectedNoteIds,
+Future<void> _generateQuiz() async {
+  try {
+    if (_selectedNoteIds.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Please select at least 2 notes')),
       );
-
-      setState(() => _isLoading = false);
-
-      if (mounted) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => QuizDetailScreen(
-              quizId: -1,
-              moduleId: widget.moduleId,
-              isStudentEnrolled: false,
-              generatedQuiz: quizData,
-            ),
-          ),
-        );
-      }
-    } catch (e) {
-      setState(() => _isLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error generating quiz: $e')),
-        );
-      }
+      return;
     }
+
+    setState(() => _isLoading = true);
+    
+    final quizData = await _apiService.generateQuizFromMultipleNotes(
+      widget.moduleId,
+      _selectedNoteIds,
+    );
+
+    setState(() => _isLoading = false);
+
+    if (mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => QuizDetailScreen(
+            quizId: -1,
+            moduleId: widget.moduleId,
+            isStudentEnrolled: false,
+            generatedQuiz: quizData,
+          ),
+        ),
+      );
+    }
+  } catch (e) {
+    setState(() => _isLoading = false);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString()),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
+  } finally {
+    // Clear selection mode after generating quiz
+    setState(() {
+      _isSelectionMode = false;
+      _selectedNoteIds.clear();
+    });
   }
+}
+
 
   Widget _buildNotesSection() {
     final notes = DataStore.getNotes(widget.moduleId);
@@ -579,6 +590,146 @@ class _ModuleDetailScreenState extends State<ModuleDetailScreen>
     }
   }
 
+  Widget _buildResultsSection() {
+    final authViewModel = Provider.of<AuthViewModel>(context, listen: false);
+    bool isTeacher = authViewModel.user.role == 'teacher';
+
+    return isTeacher ? _buildTeacherResultsView() : _buildStudentResultsView();
+  }
+
+  Widget _buildTeacherResultsView() {
+    final quizzes = DataStore.getQuizzes(widget.moduleId);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: ListView.builder(
+        itemCount: quizzes.length,
+        itemBuilder: (context, index) {
+          final quiz = quizzes[index];
+          return Card(
+            elevation: 4.0,
+            margin: EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: ListTile(
+              contentPadding: EdgeInsets.symmetric(vertical: 10.0, horizontal: 16.0),
+              leading: CircleAvatar(
+                backgroundColor: Colors.blue,
+                child: const Icon(Icons.leaderboard, color: Colors.white),
+              ),
+              title: Text(quiz.title ?? 'Untitled Quiz'),
+              subtitle: Text('View student results'),
+              onTap: () => _showQuizLeaderboard(quiz.id),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildStudentResultsView() {
+    final quizzes = DataStore.getQuizzes(widget.moduleId);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: ListView.builder(
+        itemCount: quizzes.length,
+        itemBuilder: (context, index) {
+          final quiz = quizzes[index];
+          return FutureBuilder<Map<String, dynamic>>(
+            future: _apiService.getQuizResult(quiz.id),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return Center(child: CircularProgressIndicator());
+              }
+
+              final result = snapshot.data;
+              return Card(
+                elevation: 4.0,
+                margin: EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: ExpansionTile(
+                  leading: CircleAvatar(
+                    backgroundColor: Colors.blue,
+                    child: Text(result?['percentage']?.toString() ?? '0%'),
+                  ),
+                  title: Text(quiz.title ?? 'Untitled Quiz'),
+                  subtitle: Text(result != null 
+                    ? 'Score: ${result['score']}/${result['total']}'
+                    : 'No attempt yet'),
+                  children: [
+                    if (result != null && result['ai_recommendations'] != null)
+                      Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'AI Recommendations:',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                            SizedBox(height: 8),
+                            Text(result['ai_recommendations']),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _showQuizLeaderboard(int quizId) async {
+    try {
+      final leaderboard = await _apiService.getQuizLeaderboard(quizId);
+
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Quiz Leaderboard'),
+          content: Container(
+            width: double.maxFinite,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: leaderboard.length,
+              itemBuilder: (context, index) {
+                final entry = leaderboard[index];
+                return ListTile(
+                  leading: CircleAvatar(
+                    child: Text('${index + 1}'),
+                  ),
+                  title: Text(entry['student_name']),
+                  trailing: Text('${entry['percentage']}%'),
+                  subtitle: Text('Score: ${entry['score']}/${entry['total']}'),
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading leaderboard: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -707,32 +858,22 @@ class _ModuleDetailScreenState extends State<ModuleDetailScreen>
       child: Column(
         children: [
           TabBar(
-              controller: _tabController,
-              labelColor: Colors.blue,
-              unselectedLabelColor: Colors.black,
-              tabs: [
-                Tab(text: "Notes"),
-                Tab(text: "Quizzes"),
-              ],
-              onTap: (index) {
-                setState(() {
-                  Expanded(
-                    child: TabBarView(
-                      controller: _tabController,
-                      children: [
-                        _buildNotesSection(),
-                        _buildQuizzesSection(),
-                      ],
-                    ),
-                  );
-                });
-              }),
+            controller: _tabController,
+            labelColor: Colors.blue,
+            unselectedLabelColor: Colors.black,
+            tabs: [
+              Tab(text: "Notes"),
+              Tab(text: "Quizzes"),
+              Tab(text: "Results"),
+            ],
+          ),
           Expanded(
             child: TabBarView(
               controller: _tabController,
               children: [
                 _buildNotesSection(),
                 _buildQuizzesSection(),
+                _buildResultsSection(),
               ],
             ),
           ),

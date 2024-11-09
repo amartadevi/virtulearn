@@ -4,6 +4,8 @@ class Quiz {
   final String content;
   final bool isAIGenerated;
   final bool isSaved;
+  final int moduleId; // Linking to the module the quiz belongs to
+
   
   Quiz({
     required this.id,
@@ -11,6 +13,8 @@ class Quiz {
     required this.content,
     required this.isAIGenerated,
     required this.isSaved,
+    required this.moduleId,
+
   });
 
   factory Quiz.fromJson(Map<String, dynamic> json) {
@@ -20,6 +24,7 @@ class Quiz {
       content: json['quiz_content'] ?? json['content'],
       isAIGenerated: json['is_ai_generated'] ?? false,
       isSaved: json['is_saved'] ?? false,
+      moduleId: json['module_id'] ?? 0,
     );
   }
 
@@ -30,6 +35,7 @@ class Quiz {
       'content': content,
       'is_ai_generated': isAIGenerated,
       'is_saved': isSaved,
+      'module_id': moduleId,
     };
   }
 }
