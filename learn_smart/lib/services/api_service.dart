@@ -519,47 +519,90 @@ Future<Map<String, dynamic>> generateQuizFromMultipleNotes(
   List<int> noteIds,
 ) async {
   try {
-     if (noteIds.length < 2) {
-      throw Exception('Please select at least 2 notes to generate a quiz');
-    }
-    debugPrint('Generating quiz for notes: $noteIds');
+    debugPrint('Generating quiz for module $moduleId with noteIds: $noteIds');
     
+    if (noteIds.isEmpty) {
+      throw Exception('Please select notes to generate a quiz');
+    }
+
+    // Determine if this is a single note or multiple notes quiz
+    bool isSingleNote = noteIds.length == 1;
+    String endpoint = isSingleNote 
+        ? 'modules/$moduleId/notes/${noteIds[0]}/generate-quiz/'
+        : 'modules/$moduleId/notes/generate-quiz/';
+
+    if (!isSingleNote && noteIds.length > 6) {
+      throw Exception('Please select up to 6 notes to generate a quiz');
+    }
+
     final response = await _performHttpRequest(
-      url: baseUrl + 'modules/$moduleId/notes/generate-quiz/',
+      url: baseUrl + endpoint,
       requestType: 'POST',
-      body: {
-        'note_ids': noteIds,
-        'is_ai_generated': true,
-      },
+      body: isSingleNote 
+          ? {
+              'is_ai_generated': true,
+              'num_questions': 5,
+              'complexity': 'medium',
+            }
+          : {
+              'note_ids': noteIds,
+              'is_ai_generated': true,
+              'num_questions': 5,
+              'complexity': 'medium',
+            },
     );
 
-    debugPrint('Generate Response: ${response.body}');
+    debugPrint('Generate quiz response status: ${response.statusCode}');
+    debugPrint('Generate quiz response body: ${response.body}');
 
     if (response.statusCode == 200 || response.statusCode == 201) {
       final responseData = json.decode(response.body);
       
-      final String content = responseData['quiz_content'] ?? 
-                           responseData['content'] ?? 
-                           responseData['generated_content'] ?? '';
-                           
-      if (content.isEmpty || content.contains('Model not found')) {
-        throw Exception('Failed to generate quiz. Please try with fewer or shorter notes.');
+      // Extract note IDs from response
+      List<int> responseNoteIds = [];
+      final rawNoteIds = responseData['note_ids'];
+      if (rawNoteIds != null) {
+        if (rawNoteIds is List) {
+          responseNoteIds = rawNoteIds.map((e) => int.parse(e.toString())).toList();
+        } else if (rawNoteIds is String) {
+          responseNoteIds = rawNoteIds
+              .split(',')
+              .where((e) => e.trim().isNotEmpty)
+              .map((e) => int.parse(e.trim()))
+              .toList();
+        }
+      }
+
+      // If no note IDs in response, use the original ones
+      if (responseNoteIds.isEmpty) {
+        responseNoteIds = noteIds;
+      }
+
+      debugPrint('Extracted note IDs from response: $responseNoteIds');
+      
+      final content = responseData['quiz_content'] ?? 
+                     responseData['content'] ?? 
+                     responseData['generated_content'];
+                     
+      if (content == null || content.toString().trim().isEmpty) {
+        throw Exception('Generated quiz content is empty');
       }
 
       return {
         'title': responseData['title'] ?? 'Generated Quiz',
         'content': content,
-        'note_ids': noteIds,
+        'note_ids': responseNoteIds,  // Use the extracted note IDs
         'is_ai_generated': true,
         'is_saved': false,
+        'is_single_note': isSingleNote,
       };
     } else {
       final errorData = json.decode(response.body);
       throw Exception(errorData['detail'] ?? 'Failed to generate quiz');
     }
   } catch (e) {
-    debugPrint('Error generating quiz: $e');
-    throw Exception('Failed to generate quiz: $e');
+    debugPrint('Error in generateQuizFromMultipleNotes: $e');
+    rethrow;
   }
 }
 

@@ -73,61 +73,72 @@ class _QuizDetailScreenState extends State<QuizDetailScreen> {
     });
   }
 
-  Future<void> _loadQuizDetails() async {
+Future<void> _loadQuizDetails() async {
+  try {
     setState(() {
       _isLoading = true;
       _hasError = false;
       _errorMessage = '';
     });
 
-    try {
-      if (widget.generatedQuiz != null) {
-        debugPrint('Loading generated quiz: ${widget.generatedQuiz}'); // Debug log
-        
-        final content = widget.generatedQuiz!['quiz_content'] ?? 
-                       widget.generatedQuiz!['content'] ?? 
-                       widget.generatedQuiz!['generated_content'];
-        
-        if (content == null || content.toString().isEmpty) {
-          throw Exception('Quiz content is empty');
-        }
-        
-        setState(() {
-          quiz = Quiz(
-            id: -1,
-            moduleId: widget.moduleId,
-            title: widget.generatedQuiz!['title'] ?? 'Generated Quiz',
-            content: content.toString(),
-            isAIGenerated: true,
-            isSaved: false,
-          );
-        });
-      } else {
-        final response = await _apiService.getQuizDetail(widget.moduleId, widget.quizId);
-        setState(() {
-          quiz = response;
-        });
+    List<int> noteIds = [];
+    
+    // First try to get note IDs from generated quiz
+    if (widget.generatedQuiz != null) {
+      var rawNoteIds = widget.generatedQuiz!['note_ids'];
+      debugPrint('Raw note_ids from generatedQuiz: $rawNoteIds (${rawNoteIds.runtimeType})');
+      
+      if (rawNoteIds is List) {
+        noteIds = rawNoteIds.map((e) => int.parse(e.toString())).toList();
+      } else if (rawNoteIds is String && rawNoteIds.isNotEmpty) {
+        noteIds = rawNoteIds.split(',')
+            .where((e) => e.trim().isNotEmpty)
+            .map((e) => int.parse(e.trim()))
+            .toList();
       }
 
-      if (quiz?.content != null && quiz!.content.isNotEmpty) {
-        debugPrint('Parsing quiz content: ${quiz?.content}'); // Debug log
-        _parseQuizContent(quiz?.content);
-      } else {
-        throw Exception('Quiz content is empty');
-      }
+      final content = widget.generatedQuiz!['quiz_content'] ??
+                     widget.generatedQuiz!['content'] ??
+                     widget.generatedQuiz!['generated_content'];
+
+      debugPrint('Extracted noteIds: $noteIds');
 
       setState(() {
-        _isLoading = false;
+        quiz = Quiz(
+          id: widget.quizId,
+          moduleId: widget.moduleId,
+          title: widget.generatedQuiz!['title'] ?? 'Generated Quiz',
+          content: content.toString(),
+          isAIGenerated: true,
+          isSaved: false,
+          noteIds: noteIds,
+        );
+        _parseQuizContent(content.toString());
       });
-    } catch (e) {
-      debugPrint('Error loading quiz: $e');
+    } else {
+      final response = await _apiService.getQuizDetail(widget.moduleId, widget.quizId);
       setState(() {
-        _hasError = true;
-        _errorMessage = e.toString();
-        _isLoading = false;
+        quiz = response;
+        if (quiz?.content != null) {
+          _parseQuizContent(quiz!.content);
+        }
       });
     }
+  } catch (e) {
+    debugPrint('Error loading quiz: $e');
+    setState(() {
+      _hasError = true;
+      _errorMessage = _getReadableErrorMessage(e);
+    });
+  } finally {
+    setState(() => _isLoading = false);
   }
+}
+
+// Helper function to truncate content to a manageable length
+String _truncateContent(String content, {int maxLength = 10000}) {
+  return content.length > maxLength ? content.substring(0, maxLength) + '...' : content;
+}
 
   void _startTimer() {
     timeLeft = 30;
@@ -909,137 +920,109 @@ void _submitQuiz() async {
     );
   }
 
-  Future<void> _regenerateQuiz() async {
-    if (isExplicitlySaved) {
-      final shouldRegenerate = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text('Regenerate Quiz?'),
-          content: Text('This will replace your saved quiz. Are you sure?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: Text('Regenerate'),
-            ),
-          ],
-        ),
-      );
-      if (shouldRegenerate != true) return;
-    }
+ Future<void> _regenerateQuiz() async {
+  try {
+    setState(() {
+      _isLoading = true;
+      _hasError = false;
+      _errorMessage = '';
+    });
 
-    try {
-      setState(() {
-        _isLoading = true;
-        _hasError = false;
-        _errorMessage = '';
-      });
+    // Get note IDs from either the quiz object or generated quiz
+    List<int> noteIds = [];
+    
+    if (quiz?.noteIds.isNotEmpty == true) {
+      noteIds = quiz!.noteIds;
+    } else if (widget.generatedQuiz != null) {
+      final rawNoteIds = widget.generatedQuiz!['note_ids'];
+      debugPrint('Regenerating with raw note_ids: $rawNoteIds');
       
-      Map<String, dynamic> response;
-      
-      if (widget.generatedQuiz != null) {
-        var noteIds = <int>[];
-        
-        // Debug print to see what we're receiving
-        debugPrint('Generated Quiz Data: ${widget.generatedQuiz}');
-        
-        // Handle single note_id
-        if (widget.generatedQuiz!['note_id'] != null) {
-          noteIds = [widget.generatedQuiz!['note_id'] as int];
-        }
-        // Handle multiple note_ids with improved parsing
-        else if (widget.generatedQuiz!['note_ids'] != null) {
-          var rawNoteIds = widget.generatedQuiz!['note_ids'];
-          debugPrint('Raw note_ids: $rawNoteIds (${rawNoteIds.runtimeType})');
-          
-          if (rawNoteIds is List) {
-            noteIds = List<int>.from(rawNoteIds.map((e) {
-              if (e is String) return int.parse(e);
-              return e as int;
-            }));
-          } else if (rawNoteIds is String) {
-            noteIds = rawNoteIds
-                .split(',')
-                .map((e) => int.parse(e.trim()))
-                .toList();
-          } else if (rawNoteIds is int) {
-            noteIds = [rawNoteIds];
-          }
-        }
-
-        debugPrint('Processed noteIds: $noteIds');
-
-        if (noteIds.isEmpty) {
-          throw Exception('No notes available for regeneration');
-        }
-
-        debugPrint('Regenerating quiz with note IDs: $noteIds');
-        
-        // Call appropriate API based on number of notes
-        if (noteIds.length == 1) {
-          response = await _apiService.generateQuizFromNote(
-            moduleId: widget.moduleId,
-            noteId: noteIds.first,
-          );
-        } else {
-          // Ensure noteIds is not empty and contains valid integers
-          if (noteIds.any((id) => id <= 0)) {
-            throw Exception('Invalid note IDs found: $noteIds');
-          }
-          
-          debugPrint('Calling generateQuizFromMultipleNotes with moduleId: ${widget.moduleId}, noteIds: $noteIds');
-          response = await _apiService.generateQuizFromMultipleNotes(
-            widget.moduleId,
-            noteIds,
-          );
-        }
-
-        setState(() {
-          quiz = Quiz(
-            id: widget.quizId,
-            moduleId: widget.moduleId,
-            title: response['title'],
-            content: response['content'],
-            isAIGenerated: true,
-            isSaved: false,
-          );
-          
-          // Reset quiz state
-          parsedQuestions.clear();
-          currentQuestionIndex = 0;
-          selectedAnswer = '';
-          selectedAnswers.clear();
-          showResult = false;
-          showReview = false;
-          isSaved = false;
-          isExplicitlySaved = false;
-          
-          // Parse new content
-          _parseQuizContent(response['content']);
-        });
-
-        _showSuccessSnackBar('Quiz regenerated. Click "Correct" to save.');
-      } else {
-        throw Exception('No note information available for regeneration');
+      if (rawNoteIds is List) {
+        noteIds = rawNoteIds.map((e) => int.parse(e.toString())).toList();
+      } else if (rawNoteIds is String) {
+        noteIds = rawNoteIds.split(',')
+            .where((e) => e.trim().isNotEmpty)
+            .map((e) => int.parse(e.trim()))
+            .toList();
       }
-    } catch (e) {
-      setState(() {
-        _hasError = true;
-        _errorMessage = e.toString();
-      });
-      _showErrorSnackBar(e.toString());
-      debugPrint('Error regenerating quiz: $e');
-    } finally {
-      setState(() => _isLoading = false);
     }
+
+    debugPrint('Regenerating quiz with note IDs: $noteIds');
+
+    if (noteIds.isEmpty) {
+      throw Exception('No notes found for regeneration. Please select notes first.');
+    }
+
+    // Generate new quiz with the same notes
+    final response = await _apiService.generateQuizFromMultipleNotes(
+      widget.moduleId,
+      noteIds,
+    );
+
+    setState(() {
+      quiz = Quiz(
+        id: widget.quizId,
+        moduleId: widget.moduleId,
+        title: response['title'],
+        content: response['content'],
+        isAIGenerated: true,
+        isSaved: false,
+        noteIds: noteIds,  // Preserve the note IDs
+      );
+
+      // Reset quiz states
+      parsedQuestions.clear();
+      currentQuestionIndex = 0;
+      selectedAnswer = '';
+      selectedAnswers.clear();
+      showResult = false;
+      showReview = false;
+      isSaved = false;
+      isExplicitlySaved = false;
+
+      // Parse new content
+      _parseQuizContent(response['content']);
+    });
+
+    _showSuccessSnackBar('Quiz regenerated successfully');
+  } catch (e) {
+    setState(() {
+      _hasError = true;
+      _errorMessage = _getReadableErrorMessage(e);
+    });
+    _showErrorSnackBar(_errorMessage);
+    debugPrint('Error regenerating quiz: $e');
+  } finally {
+    setState(() => _isLoading = false);
   }
+}
+
+// Helper function for user-friendly error messages
+String _getReadableErrorMessage(dynamic error) {
+  if (error is FormatException) {
+    return 'Invalid note ID format. Please ensure note IDs are valid integers.';
+  }
+  return error.toString();
+}
+
 
   Future<void> _saveQuiz() async {
     try {
       if (quiz == null) throw Exception('No quiz to save');
+      
+      // Get note IDs from the current quiz
+      List<int> noteIds = quiz!.noteIds;
+      if (noteIds.isEmpty && widget.generatedQuiz != null) {
+        var rawNoteIds = widget.generatedQuiz!['note_ids'];
+        if (rawNoteIds is List) {
+          noteIds = rawNoteIds.map((e) => int.parse(e.toString())).toList();
+        } else if (rawNoteIds is String && rawNoteIds.isNotEmpty) {
+          noteIds = rawNoteIds.split(',')
+              .where((e) => e.trim().isNotEmpty)
+              .map((e) => int.parse(e.trim()))
+              .toList();
+        }
+      }
       
       await _apiService.saveAIQuiz(
         widget.moduleId,
@@ -1047,7 +1030,7 @@ void _submitQuiz() async {
           'title': quiz!.title,
           'content': quiz!.content,
           'is_ai_generated': true,
-          'note_ids': widget.generatedQuiz!['note_ids'],
+          'note_ids': noteIds,  // Use the extracted note IDs
         },
       );
       
@@ -1057,7 +1040,7 @@ void _submitQuiz() async {
       });
     } catch (e) {
       debugPrint('Error saving quiz: $e');
-      rethrow;
+      _showErrorSnackBar('Failed to save quiz: ${e.toString()}');
     }
   }
 
@@ -1206,3 +1189,42 @@ String _cleanText(String text) {
     .trim();
 }
 
+String _truncateContent(String content, {int maxLength = 4000}) {
+  if (content.length <= maxLength) return content;
+  
+  // Find the last complete question before the maxLength
+  final RegExp questionPattern = RegExp(r'\d+[\).].*?(?=\d+[\).]|$)', dotAll: true);
+  final matches = questionPattern.allMatches(content.substring(0, maxLength));
+  
+  if (matches.isEmpty) return content.substring(0, maxLength);
+  
+  // Get the last complete question
+  final lastMatch = matches.last;
+  return content.substring(0, lastMatch.end);
+}
+
+String _getReadableErrorMessage(dynamic error) {
+  final errorStr = error.toString().toLowerCase();
+  
+  if (errorStr.contains('model not found')) {
+    return 'AI service is temporarily unavailable. Please try again later.';
+  }
+  
+  if (errorStr.contains('too long')) {
+    return 'Selected notes are too long. Please select fewer notes or shorter content.';
+  }
+  
+  if (errorStr.contains('rate limit')) {
+    return 'Too many requests. Please wait a moment and try again.';
+  }
+  
+  // Remove technical details from error messages
+  final cleanError = error.toString()
+    .replaceAll(RegExp(r'Exception: '), '')
+    .replaceAll(RegExp(r'\[.*?\]'), '')
+    .trim();
+    
+  return cleanError.isEmpty ? 
+    'An unexpected error occurred. Please try again.' : 
+    cleanError;
+}

@@ -1,30 +1,55 @@
+import 'package:flutter/foundation.dart';
+
 class Quiz {
   final int id;
+  final int moduleId;
   final String title;
   final String content;
   final bool isAIGenerated;
   final bool isSaved;
-  final int moduleId; // Linking to the module the quiz belongs to
+  final List<int> noteIds;
 
-  
   Quiz({
     required this.id,
+    required this.moduleId,
     required this.title,
     required this.content,
-    required this.isAIGenerated,
-    required this.isSaved,
-    required this.moduleId,
-
+    this.isAIGenerated = false,
+    this.isSaved = false,
+    this.noteIds = const [],
   });
 
   factory Quiz.fromJson(Map<String, dynamic> json) {
+    List<int> processNoteIds() {
+      final rawNoteIds = json['note_ids'];
+      debugPrint('Processing raw note_ids in Quiz.fromJson: $rawNoteIds (${rawNoteIds.runtimeType})');
+      
+      if (rawNoteIds == null) return [];
+      
+      if (rawNoteIds is List) {
+        return rawNoteIds.map((e) => int.parse(e.toString())).toList();
+      }
+      if (rawNoteIds is String && rawNoteIds.isNotEmpty) {
+        return rawNoteIds
+            .split(',')
+            .where((e) => e.trim().isNotEmpty)
+            .map((e) => int.parse(e.trim()))
+            .toList();
+      }
+      return [];
+    }
+
+    final noteIds = processNoteIds();
+    debugPrint('Processed note IDs in Quiz.fromJson: $noteIds');
+
     return Quiz(
-      id: json['id'],
-      title: json['title'],
-      content: json['quiz_content'] ?? json['content'],
+      id: json['id'] ?? -1,
+      moduleId: json['module'] ?? json['module_id'],
+      title: json['title'] ?? 'Generated Quiz',
+      content: json['content'] ?? json['quiz_content'] ?? '',
       isAIGenerated: json['is_ai_generated'] ?? false,
       isSaved: json['is_saved'] ?? false,
-      moduleId: json['module_id'] ?? 0,
+      noteIds: noteIds,
     );
   }
 
@@ -36,6 +61,7 @@ class Quiz {
       'is_ai_generated': isAIGenerated,
       'is_saved': isSaved,
       'module_id': moduleId,
+      'note_ids': noteIds,
     };
   }
 }
