@@ -276,15 +276,24 @@ void _parseQuizContent(String? content) {
   void _calculateResult() {
     correctAnswersCount = 0;
     for (int i = 0; i < parsedQuestions.length; i++) {
-      String correctAnswer = parsedQuestions[i]['correctAnswer'];
-      String? selectedAnswer = selectedAnswers[i];
-
-      if (selectedAnswer != null &&
-          correctAnswer == selectedAnswer.substring(0, 1)) {
-        correctAnswersCount++;
+      final question = parsedQuestions[i];
+      final selectedAnswer = selectedAnswers[i];
+      
+      if (selectedAnswer != null && question['options'] != null) {
+        // Get the index of the selected answer
+        final selectedIndex = (question['options'] as List).indexOf(selectedAnswer);
+        if (selectedIndex != -1) {
+          // Convert to letter (A, B, C, etc.)
+          final selectedLetter = String.fromCharCode(65 + selectedIndex);
+          if (selectedLetter == question['correctAnswer']) {
+            correctAnswersCount++;
+          }
+        }
       }
     }
+    debugPrint('Correct answers: $correctAnswersCount out of ${parsedQuestions.length}');
   }
+
   String _generateSubmissionContent() {
     List<Map<String, dynamic>> submissionData = [];
     for (int i = 0; i < parsedQuestions.length; i++) {
@@ -310,18 +319,39 @@ void _submitQuiz() async {
   try {
     setState(() => _isLoading = true);
 
-    int totalQuestions = parsedQuestions.length;
-    double percentage = (correctAnswersCount / totalQuestions) * 100;
-    String submissionContent = _generateSubmissionContent();
+    final totalQuestions = parsedQuestions.length;
+    final percentage = (correctAnswersCount / totalQuestions) * 100;
 
-    debugPrint('Submitting quiz with percentage: $percentage');
-    debugPrint('Quiz content: $submissionContent');
+    Map<String, dynamic> studentAnswers = {};
+    for (int i = 0; i < parsedQuestions.length; i++) {
+      final question = parsedQuestions[i];
+      final selectedAnswer = selectedAnswers[i];
+      final selectedIndex = selectedAnswer != null ? 
+          (question['options'] as List).indexOf(selectedAnswer) : -1;
+      final selectedLetter = selectedIndex != -1 ? 
+          String.fromCharCode(65 + selectedIndex) : '';
+
+      studentAnswers['$i'] = {
+        'question': question['question'],
+        'selected_answer': selectedLetter,
+        'correct_answer': question['correctAnswer'],
+        'is_correct': selectedLetter == question['correctAnswer'],
+      };
+    }
+
+    final resultData = {
+      'score': correctAnswersCount,
+      'total_questions': totalQuestions,
+      'percentage': percentage,
+      'student_answers': studentAnswers,
+    };
+
+    debugPrint('Submitting quiz result: $resultData');
 
     await _apiService.submitQuizResult(
-      moduleId: widget.moduleId,
-      quizId: widget.quizId,
-      percentage: percentage,
-      quizContent: submissionContent,
+      widget.moduleId,
+      widget.quizId,
+      resultData,
     );
 
     setState(() {
@@ -337,7 +367,6 @@ void _submitQuiz() async {
     );
   } catch (e) {
     setState(() => _isLoading = false);
-    
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(e.toString()),
@@ -790,79 +819,272 @@ void _submitQuiz() async {
     double percentage = (correctAnswersCount / totalQuestions) * 100;
 
     return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Text(
-          'Quiz Completed!',
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF1A4A44),
+        Expanded(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  // Score Card
+                  Container(
+                    padding: EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.1),
+                          blurRadius: 10,
+                          offset: Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          'Quiz Complete!',
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue.shade900,
+                          ),
+                        ),
+                        SizedBox(height: 16),
+                        CircleAvatar(
+                          radius: 50,
+                          backgroundColor: _getScoreColor(percentage),
+                          child: Text(
+                            '${percentage.round()}%',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: 16),
+                        Text(
+                          '$correctAnswersCount out of $totalQuestions correct',
+                          style: TextStyle(
+                            fontSize: 18,
+                            color: Colors.grey[700],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: 24),
+                  
+                  // Review Questions Button
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        showReview = true;
+                      });
+                    },
+                    icon: Icon(Icons.rate_review),
+                    label: Text('Review Answers'),
+                    style: ElevatedButton.styleFrom(
+                      padding: EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                  
+                  SizedBox(height: 16),
+                  
+                  // Return to Module Button
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                    },
+                    icon: Icon(Icons.arrow_back),
+                    label: Text('Return to Module'),
+                    style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
-        SizedBox(height: 20),
+      ],
+    );
+  }
+
+  Widget _buildReviewView() {
+    return Column(
+      children: [
+        // Review Header
         Container(
-          padding: EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: Color(0xFFE3F2FD),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Column(
+          padding: EdgeInsets.all(16),
+          color: Colors.blue.shade50,
+          child: Row(
             children: [
-              Text(
-                '${percentage.round()}%',
-                style: TextStyle(
-                  fontSize: 48,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF1A4A44),
-                ),
+              IconButton(
+                icon: Icon(Icons.arrow_back),
+                onPressed: () {
+                  setState(() {
+                    showReview = false;
+                  });
+                },
               ),
               Text(
-                '$correctAnswersCount out of $totalQuestions correct',
+                'Review Answers',
                 style: TextStyle(
-                  fontSize: 18,
-                  color: Colors.grey[600],
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
             ],
           ),
         ),
-        SizedBox(height: 32),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            ElevatedButton(
-              onPressed: () {
-                setState(() {
-                  showReview = true;
-                });
-              },
-              child: Text('Review Answers'),
-              style: ElevatedButton.styleFrom(
-                foregroundColor: Color(0xFF1A4A44),
-                padding: EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+        
+        // Questions List
+        Expanded(
+          child: ListView.builder(
+            padding: EdgeInsets.all(16),
+            itemCount: parsedQuestions.length,
+            itemBuilder: (context, index) {
+              final question = parsedQuestions[index];
+              final selectedAnswer = selectedAnswers[index];
+              final correctAnswerLetter = question['correctAnswer'];
+              final options = question['options'] as List;
+              
+              return Card(
+                margin: EdgeInsets.only(bottom: 16),
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Question ${index + 1}',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        question['question'],
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      SizedBox(height: 16),
+                      
+                      ...List.generate(options.length, (optionIndex) {
+                        final option = options[optionIndex];
+                        final optionLetter = String.fromCharCode(65 + optionIndex);
+                        final isSelected = selectedAnswer == option;
+                        final isCorrectAnswer = optionLetter == correctAnswerLetter;
+                        
+                        return Container(
+                          margin: EdgeInsets.only(bottom: 8),
+                          decoration: BoxDecoration(
+                            color: isSelected && !isCorrectAnswer 
+                                ? Colors.red.withOpacity(0.1)
+                                : isCorrectAnswer 
+                                    ? Colors.green.withOpacity(0.1)
+                                    : Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: isSelected && !isCorrectAnswer 
+                                  ? Colors.red
+                                  : isCorrectAnswer 
+                                      ? Colors.green
+                                      : Colors.grey[300]!,
+                              width: 2,
+                            ),
+                          ),
+                          child: ListTile(
+                            leading: Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: isSelected && !isCorrectAnswer 
+                                      ? Colors.red
+                                      : isCorrectAnswer 
+                                          ? Colors.green
+                                          : Colors.grey[400]!,
+                                ),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  optionLetter,
+                                  style: TextStyle(
+                                    color: isSelected && !isCorrectAnswer 
+                                        ? Colors.red
+                                        : isCorrectAnswer 
+                                            ? Colors.green
+                                            : Colors.grey[600],
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            title: Text(
+                              option,
+                              style: TextStyle(
+                                color: isSelected && !isCorrectAnswer 
+                                    ? Colors.red
+                                    : isCorrectAnswer 
+                                        ? Colors.green
+                                        : Colors.black87,
+                              ),
+                            ),
+                            trailing: isSelected || isCorrectAnswer
+                                ? Icon(
+                                    isCorrectAnswer 
+                                        ? Icons.check_circle
+                                        : Icons.cancel,
+                                    color: isCorrectAnswer 
+                                        ? Colors.green
+                                        : Colors.red,
+                                  )
+                                : null,
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
                 ),
-              ),
-            ),
-            SizedBox(width: 16),
-            OutlinedButton(
-              onPressed: () {
-                Navigator.pop(context);
-              },
-              child: Text('Return'),
-              style: OutlinedButton.styleFrom(
-                padding: EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-          ],
+              );
+            },
+          ),
         ),
       ],
     );
+  }
+
+  Color _getScoreColor(double percentage) {
+    if (percentage >= 80) return Colors.green;
+    if (percentage >= 60) return Colors.orange;
+    return Colors.red;
+  }
+
+  Color _getOptionColor(bool isSelected, bool isCorrect) {
+    if (isCorrect) return Colors.green.shade100;
+    if (isSelected) return Colors.red.shade100;
+    return Colors.white;
+  }
+
+  Color _getOptionBorderColor(bool isSelected, bool isCorrect) {
+    if (isCorrect) return Colors.green;
+    if (isSelected) return Colors.red;
+    return Colors.grey.shade300;
   }
 
   Widget _buildGeneratedQuizActions() {
@@ -1157,13 +1379,21 @@ Widget _buildBody() {
     return const Center(child: Text('No questions available'));
   }
 
+  if (showResult) {
+    return Scaffold(
+      body: SafeArea(
+        child: showReview ? _buildReviewView() : _buildResultView(),
+      ),
+    );
+  }
+
   return Column(
     children: [
       Expanded(
         child: showResult
             ? _buildResultView()
             : showReview
-                ? _buildReviewContent()
+                ? _buildReviewView()
                 : isStudent && !hasQuizStarted && !widget.isEditMode
                     ? _buildAttemptQuizButton()
                     : _buildQuizContent(),

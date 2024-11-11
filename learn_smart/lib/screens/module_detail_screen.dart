@@ -9,6 +9,8 @@ import 'package:learn_smart/view_models/auth_view_model.dart';
 import 'package:provider/provider.dart';
 import 'notes_detail_screen.dart';
 import 'quiz_detail_screen.dart';
+import 'suggestion_screen.dart';
+import 'package:intl/intl.dart';
 
 class ModuleDetailScreen extends StatefulWidget {
   final int moduleId;
@@ -33,6 +35,8 @@ class _ModuleDetailScreenState extends State<ModuleDetailScreen>
   String _errorMessage = '';
   bool _isSelectionMode = false;
   List<int> _selectedNoteIds = [];
+  Map<int, bool> _sortAscending = {};
+  Map<int, bool> _expandedQuizzes = {};
 
   @override
   void initState() {
@@ -594,99 +598,458 @@ Future<void> _generateQuiz() async {
     final authViewModel = Provider.of<AuthViewModel>(context, listen: false);
     bool isTeacher = authViewModel.user.role == 'teacher';
 
-    return isTeacher ? _buildTeacherResultsView() : _buildStudentResultsView();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (isTeacher) ...[
+          Padding(
+            padding: EdgeInsets.all(16),
+            child: Text(
+              'All Student Results',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          Expanded(child: _buildTeacherResultsView()),
+        ],
+        if (!isTeacher) ...[
+          Padding(
+            padding: EdgeInsets.all(16),
+            child: Text(
+              'Your Quiz Results',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          Expanded(child: _buildStudentResultsView()),
+        ],
+      ],
+    );
   }
 
   Widget _buildTeacherResultsView() {
-    final quizzes = DataStore.getQuizzes(widget.moduleId);
+    return FutureBuilder<List<modelsQuiz.Quiz>>(
+      future: _apiService.fetchQuizzes(widget.moduleId).then((_) => DataStore.getQuizzes(widget.moduleId)),
+      builder: (context, quizSnapshot) {
+        if (quizSnapshot.connectionState == ConnectionState.waiting) {
+          return Center(child: CircularProgressIndicator());
+        }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: ListView.builder(
-        itemCount: quizzes.length,
-        itemBuilder: (context, index) {
-          final quiz = quizzes[index];
-          return Card(
-            elevation: 4.0,
-            margin: EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: ListTile(
-              contentPadding: EdgeInsets.symmetric(vertical: 10.0, horizontal: 16.0),
-              leading: CircleAvatar(
-                backgroundColor: Colors.blue,
-                child: const Icon(Icons.leaderboard, color: Colors.white),
+        final quizzes = quizSnapshot.data ?? [];
+        if (quizzes.isEmpty) {
+          return Center(child: Text('No quizzes available'));
+        }
+
+        return ListView.builder(
+          padding: EdgeInsets.all(16),
+          itemCount: quizzes.length,
+          itemBuilder: (context, index) {
+            final quiz = quizzes[index];
+            _expandedQuizzes.putIfAbsent(quiz.id, () => false);
+
+            return Card(
+              margin: EdgeInsets.only(bottom: 16),
+              child: Column(
+                children: [
+                  InkWell(
+                    onTap: () {
+                      setState(() {
+                        _expandedQuizzes[quiz.id] = !_expandedQuizzes[quiz.id]!;
+                      });
+                    },
+                    child: Container(
+                      color: Colors.blue[50],
+                      padding: EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          Icon(Icons.quiz, color: Colors.blue),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              quiz.title ?? 'Untitled Quiz',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          Icon(
+                            _expandedQuizzes[quiz.id]! 
+                              ? Icons.keyboard_arrow_up 
+                              : Icons.keyboard_arrow_down,
+                            color: Colors.blue,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (_expandedQuizzes[quiz.id]!)
+                    FutureBuilder<List<Map<String, dynamic>>>(
+                      future: _apiService.getQuizLeaderboard(quiz.id),
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState == ConnectionState.waiting) {
+                          return Padding(
+                            padding: EdgeInsets.all(16),
+                            child: Center(child: CircularProgressIndicator()),
+                          );
+                        }
+
+                        var results = snapshot.data ?? [];
+                        if (results.isEmpty) {
+                          return Padding(
+                            padding: EdgeInsets.all(16),
+                            child: Text('No attempts yet'),
+                          );
+                        }
+
+                        results.sort((a, b) {
+                          final percentageA = double.tryParse(a['percentage']?.toString() ?? '0') ?? 0.0;
+                          final percentageB = double.tryParse(b['percentage']?.toString() ?? '0') ?? 0.0;
+                          return percentageB.compareTo(percentageA);
+                        });
+
+                        return Column(
+                          children: [
+                            Padding(
+                              padding: EdgeInsets.all(16),
+                              child: Row(
+                                children: [
+                                  SizedBox(width: 50),
+                                  Expanded(
+                                    child: Text(
+                                      'Student',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.grey[700],
+                                      ),
+                                    ),
+                                  ),
+                                  Text(
+                                    'Performance',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.grey[700],
+                                    ),
+                                  ),
+                                  SizedBox(width: 120), // Adjusted for suggestion button
+                                ],
+                              ),
+                            ),
+                            Divider(),
+                            ListView.builder(
+                              shrinkWrap: true,
+                              physics: NeverScrollableScrollPhysics(),
+                              itemCount: results.length,
+                              itemBuilder: (context, index) {
+                                final result = results[index];
+                                final studentId = int.tryParse(result['student']?.toString() ?? '');
+                                final studentName = result['student_name'] ?? 'Unknown Student';
+                                final percentage = double.tryParse(result['percentage']?.toString() ?? '0') ?? 0.0;
+
+                                return ListTile(
+                                  leading: CircleAvatar(
+                                    backgroundColor: Colors.grey[200],
+                                    child: Text(
+                                      '${index + 1}',
+                                      style: TextStyle(
+                                        color: Colors.black,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                  title: Text(studentName),
+                                  subtitle: Container(
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: _getScoreColor(percentage),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Text(
+                                      '${percentage.round()}%',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        icon: Icon(Icons.rate_review, color: Colors.blue),
+                                        onPressed: () => _showReview(quiz.id, studentId, studentName),
+                                        tooltip: 'Review Answers',
+                                      ),
+                                      IconButton(
+                                        icon: Icon(Icons.lightbulb_outline, color: Colors.orange),
+                                        onPressed: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (context) => SuggestionScreen(
+                                                quizId: quiz.id,
+                                                studentId: studentId ?? 0,
+                                                studentName: studentName,
+                                                percentage: percentage,
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                        tooltip: 'View Suggestions',
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                ],
               ),
-              title: Text(quiz.title ?? 'Untitled Quiz'),
-              subtitle: Text('View student results'),
-              onTap: () => _showQuizLeaderboard(quiz.id),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showReview(int quizId, int? studentId, String studentName) async {
+    if (studentId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Cannot load review: Invalid student ID')),
+      );
+      return;
+    }
+    
+    try {
+      final review = await _apiService.getStudentQuizReview(quizId, studentId);
+      if (!mounted) return;
+      
+      showDialog(
+        context: context,
+        builder: (context) => _buildReviewDialog(
+          context,
+          'Review - $studentName',
+          review,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error loading review: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Widget _buildReviewDialog(BuildContext context, String studentName, List<Map<String, dynamic>> review) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Container(
+        width: double.maxFinite,
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
+        child: Column(
+          children: [
+            Container(
+              padding: EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.blue,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      '$studentName\'s Review',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.close, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
             ),
-          );
-        },
+            Expanded(
+              child: ListView.builder(
+                padding: EdgeInsets.all(16),
+                itemCount: review.length,
+                itemBuilder: (context, index) {
+                  final question = review[index];
+                  final isCorrect = question['is_correct'] ?? false;
+                  
+                  return Card(
+                    margin: EdgeInsets.only(bottom: 16),
+                    child: Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                isCorrect ? Icons.check_circle : Icons.cancel,
+                                color: isCorrect ? Colors.green : Colors.red,
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                'Question ${index + 1}',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ],
+                          ),
+                          SizedBox(height: 8),
+                          Text(question['question'] ?? ''),
+                          SizedBox(height: 16),
+                          Text(
+                            'Student Answer: ${question['selected_answer']}',
+                            style: TextStyle(
+                              color: isCorrect ? Colors.green : Colors.red,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          if (!isCorrect) ...[
+                            SizedBox(height: 8),
+                            Text(
+                              'Correct Answer: ${question['correct_answer']}',
+                              style: TextStyle(
+                                color: Colors.green,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildStudentResultsView() {
-    final quizzes = DataStore.getQuizzes(widget.moduleId);
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _apiService.getQuizResults(widget.moduleId),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(child: CircularProgressIndicator());
+        }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: ListView.builder(
-        itemCount: quizzes.length,
-        itemBuilder: (context, index) {
-          final quiz = quizzes[index];
-          return FutureBuilder<Map<String, dynamic>>(
-            future: _apiService.getQuizResult(quiz.id),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return Center(child: CircularProgressIndicator());
-              }
+        if (snapshot.hasError) {
+          return Center(
+            child: Text(
+              'Error loading results: ${snapshot.error}',
+              style: TextStyle(color: Colors.red),
+            ),
+          );
+        }
 
-              final result = snapshot.data;
-              return Card(
-                elevation: 4.0,
-                margin: EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: ExpansionTile(
-                  leading: CircleAvatar(
-                    backgroundColor: Colors.blue,
-                    child: Text(result?['percentage']?.toString() ?? '0%'),
+        final results = snapshot.data ?? [];
+        if (results.isEmpty) {
+          return Center(
+            child: Text(
+              'No quiz attempts yet',
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.grey[600],
+              ),
+            ),
+          );
+        }
+
+        return ListView.builder(
+          padding: EdgeInsets.all(16),
+          itemCount: results.length,
+          itemBuilder: (context, index) {
+            final result = results[index];
+            final score = int.tryParse(result['score']?.toString() ?? '0') ?? 0;
+            final total = int.tryParse(result['total_questions']?.toString() ?? '0') ?? 0;
+            final percentage = double.tryParse(result['percentage']?.toString() ?? '0') ?? 0.0;
+            final quizTitle = result['quiz_title'] ?? 'Untitled Quiz';
+            final completedAt = DateTime.tryParse(result['completed_at'] ?? '');
+
+            return Card(
+              elevation: 2,
+              margin: EdgeInsets.only(bottom: 12),
+              child: ListTile(
+                contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                leading: CircleAvatar(
+                  backgroundColor: _getScoreColor(percentage),
+                  child: Text(
+                    '${percentage.round()}%',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                  title: Text(quiz.title ?? 'Untitled Quiz'),
-                  subtitle: Text(result != null 
-                    ? 'Score: ${result['score']}/${result['total']}'
-                    : 'No attempt yet'),
+                ),
+                title: Text(
+                  quizTitle,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (result != null && result['ai_recommendations'] != null)
-                      Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'AI Recommendations:',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            ),
-                            SizedBox(height: 8),
-                            Text(result['ai_recommendations']),
-                          ],
+                    SizedBox(height: 4),
+                    Text(
+                      'Score: $score/$total',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey[700],
+                      ),
+                    ),
+                    if (completedAt != null)
+                      Text(
+                        'Completed: ${DateFormat('MMM d, yyyy').format(completedAt)}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
                         ),
                       ),
                   ],
                 ),
-              );
-            },
-          );
-        },
-      ),
+              ),
+            );
+          },
+        );
+      },
     );
+  }
+
+  Color _getScoreColor(double percentage) {
+    if (percentage >= 80) return Colors.green;
+    if (percentage >= 60) return Colors.blue;
+    if (percentage >= 40) return Colors.orange;
+    return Colors.red;
   }
 
   Future<void> _showQuizLeaderboard(int quizId) async {
