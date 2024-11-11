@@ -6,6 +6,8 @@ import 'package:learn_smart/services/api_service.dart';
 import 'package:learn_smart/models/quiz.dart';
 import 'package:provider/provider.dart';
 import 'package:learn_smart/view_models/auth_view_model.dart';
+import 'package:learn_smart/screens/suggestion_screen.dart';
+import 'package:learn_smart/screens/result_screen.dart';
 
 class QuizDetailScreen extends StatefulWidget {
   final int moduleId;
@@ -356,7 +358,7 @@ void _submitQuiz() async {
 
     setState(() {
       _isLoading = false;
-      showResult = true;
+      showResult = true;  // This will show the result view
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -815,107 +817,82 @@ void _submitQuiz() async {
   }
 
   Widget _buildResultView() {
-    int totalQuestions = parsedQuestions.length;
-    double percentage = (correctAnswersCount / totalQuestions) * 100;
-
-    return Column(
-      children: [
-        Expanded(
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
+    final percentage = (correctAnswersCount / parsedQuestions.length) * 100;
+    
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(16),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            'Quiz Complete!',
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: Colors.blue[700],
+            ),
+          ),
+          SizedBox(height: 24),
+          // Score Circle
+          Container(
+            width: 120,
+            height: 120,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: _getScoreColor(percentage),
+            ),
+            child: Center(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Score Card
-                  Container(
-                    padding: EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.shade50,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.1),
-                          blurRadius: 10,
-                          offset: Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      children: [
-                        Text(
-                          'Quiz Complete!',
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.blue.shade900,
-                          ),
-                        ),
-                        SizedBox(height: 16),
-                        CircleAvatar(
-                          radius: 50,
-                          backgroundColor: _getScoreColor(percentage),
-                          child: Text(
-                            '${percentage.round()}%',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        SizedBox(height: 16),
-                        Text(
-                          '$correctAnswersCount out of $totalQuestions correct',
-                          style: TextStyle(
-                            fontSize: 18,
-                            color: Colors.grey[700],
-                          ),
-                        ),
-                      ],
+                  Text(
+                    '${percentage.round()}%',
+                    style: TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
                     ),
                   ),
-                  SizedBox(height: 24),
-                  
-                  // Review Questions Button
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      setState(() {
-                        showReview = true;
-                      });
-                    },
-                    icon: Icon(Icons.rate_review),
-                    label: Text('Review Answers'),
-                    style: ElevatedButton.styleFrom(
-                      padding: EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                  
-                  SizedBox(height: 16),
-                  
-                  // Return to Module Button
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.pop(context);
-                    },
-                    icon: Icon(Icons.arrow_back),
-                    label: Text('Return to Module'),
-                    style: OutlinedButton.styleFrom(
-                      padding: EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                  Text(
+                    '$correctAnswersCount out of ${parsedQuestions.length} correct',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.white,
                     ),
                   ),
                 ],
               ),
             ),
           ),
-        ),
-      ],
+          SizedBox(height: 32),
+          
+          // Show Suggestions Button if score is below 80%
+          if (percentage < 80)
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => SuggestionScreen(
+                      quizId: widget.quizId,
+                      studentId: Provider.of<AuthViewModel>(context, listen: false).user.id ?? 0,
+                      studentName: Provider.of<AuthViewModel>(context, listen: false).user.username ?? 'Student',
+                      percentage: percentage,
+                    ),
+                  ),
+                );
+              },
+              icon: Icon(Icons.lightbulb_outline),
+              label: Text('Get Suggestions'),
+              style: ElevatedButton.styleFrom(
+                padding: EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 

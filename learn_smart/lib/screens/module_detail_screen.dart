@@ -987,55 +987,53 @@ Future<void> _generateQuiz() async {
           itemCount: results.length,
           itemBuilder: (context, index) {
             final result = results[index];
-            final score = int.tryParse(result['score']?.toString() ?? '0') ?? 0;
-            final total = int.tryParse(result['total_questions']?.toString() ?? '0') ?? 0;
-            final percentage = double.tryParse(result['percentage']?.toString() ?? '0') ?? 0.0;
+            final quizId = result['quiz'] ?? 0; // Get the actual quiz ID from result
             final quizTitle = result['quiz_title'] ?? 'Untitled Quiz';
+            final percentage = double.tryParse(result['percentage']?.toString() ?? '0') ?? 0.0;
+            final score = result['score']?.toString() ?? '0';
+            final total = result['total_questions']?.toString() ?? '0';
             final completedAt = DateTime.tryParse(result['completed_at'] ?? '');
+            final authViewModel = Provider.of<AuthViewModel>(context, listen: false);
 
             return Card(
               elevation: 2,
               margin: EdgeInsets.only(bottom: 12),
               child: ListTile(
-                contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 leading: CircleAvatar(
                   backgroundColor: _getScoreColor(percentage),
                   child: Text(
-                    '${percentage.round()}%',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    '${percentage.toStringAsFixed(0)}%',
+                    style: TextStyle(color: Colors.white, fontSize: 12),
                   ),
                 ),
-                title: Text(
-                  quizTitle,
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
+                title: Text(quizTitle),
                 subtitle: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(height: 4),
-                    Text(
-                      'Score: $score/$total',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey[700],
-                      ),
-                    ),
+                    Text('Score: $score/$total'),
                     if (completedAt != null)
                       Text(
                         'Completed: ${DateFormat('MMM d, yyyy').format(completedAt)}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                        ),
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                       ),
                   ],
+                ),
+                trailing: IconButton(
+                  icon: Icon(Icons.lightbulb_outline, color: Colors.orange),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => SuggestionScreen(
+                          quizId: quizId, // Use the correct quiz ID from the result
+                          studentId: authViewModel.user.id ?? 0,
+                          studentName: authViewModel.user.username ?? '',
+                          percentage: percentage,
+                        ),
+                      ),
+                    );
+                  },
+                  tooltip: 'View Suggestions',
                 ),
               ),
             );

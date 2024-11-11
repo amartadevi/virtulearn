@@ -1,48 +1,63 @@
 class Note {
-  int id;
-  String? title; // Removed final
-  String? content; // Removed final
-  String? topic; // Removed final
+  final int id;
   final int moduleId;
-  final bool isAIGenerated;
+  final String title;
+  final String content;
+  final String? topic;
+  bool isAIGenerated;
   bool isSaved;
 
   Note({
     required this.id,
-    this.title,
-    this.content,
-    this.topic,
     required this.moduleId,
-    required this.isAIGenerated,
+    required this.title,
+    required this.content,
+    this.topic,
+    this.isAIGenerated = false,
     this.isSaved = false,
   });
 
-  void markAsSaved() {
-    isSaved = true;
-  }
-
   factory Note.fromJson(Map<String, dynamic> json) {
     return Note(
-      id: json['id'] ?? 0, // Default value if 'id' is null
-      title: json['title'] ?? 'Untitled', // Default value if 'title' is null
-      content:
-          json['content'] ?? 'No content', // Default value if 'content' is null
-      moduleId: json['module'] ?? 0, // Default value for moduleId
-      isAIGenerated: json['isAIGenerated'] ?? false,
-      isSaved: json['isSaved'] ?? false,
-      topic: json['topic'] ?? 'No topic',
+      id: json['id'],
+      moduleId: json['module'],
+      title: json['title'],
+      content: json['content'],
+      topic: json['topic'],
+      isAIGenerated: json['is_ai_generated'] ?? false,
+      isSaved: json['is_saved'] ?? false,
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
       'id': id,
+      'module': moduleId,
       'title': title,
       'content': content,
-      'module': moduleId,
-      'isAIGenerated': isAIGenerated,
-      'isSaved': isSaved,
       'topic': topic,
+      'is_ai_generated': isAIGenerated,
+      'is_saved': isSaved,
     };
+  }
+
+  Note copyWith({
+    int? id,
+    int? moduleId,
+    String? title,
+    String? content,
+    String? topic,
+    bool? isAIGenerated,
+    bool? isSaved,
+  }) {
+    return Note(
+      id: id ?? this.id,
+      moduleId: moduleId ?? this.moduleId,
+      title: title ?? this.title,
+      content: content ?? this.content,
+      topic: topic ?? this.topic,
+      isAIGenerated: isAIGenerated ?? this.isAIGenerated,
+      isSaved: isSaved ?? this.isSaved,
+    );
   }
 }

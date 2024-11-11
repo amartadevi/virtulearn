@@ -366,16 +366,23 @@ class ApiService {
   }
 
   // Fetch quiz results
-  Future<List<dynamic>> fetchQuizResults(int quizId) async {
-    final response = await _performHttpRequest(
-      url: baseUrl + 'quizzes/$quizId/results/',
-      requestType: 'GET',
-    );
+  Future<List<Map<String, dynamic>>> fetchQuizResults(int quizId) async {
+    try {
+      // Update the endpoint to match your Django URL
+      final response = await _performHttpRequest(
+        url: baseUrl + 'result/$quizId/results/', // Changed from 'quizzes/$quizId/results/'
+        requestType: 'GET',
+      );
 
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to fetch quiz results');
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        return List<Map<String, dynamic>>.from(data);
+      } else {
+        throw Exception('Failed to fetch quiz results');
+      }
+    } catch (e) {
+      debugPrint('Error fetching quiz results: $e');
+      throw Exception('Error loading quiz results: $e');
     }
   }
 
@@ -933,6 +940,152 @@ Future<List<Map<String, dynamic>>> getStudentQuizReview(int quizId, int studentI
   } catch (e) {
     debugPrint('Error fetching student review: $e');
     throw Exception('Error loading review: $e');
+  }
+}
+
+Future<List<Map<String, dynamic>>> getStudentResults(List<Quiz> quizzes) async {
+  try {
+    List<Map<String, dynamic>> allResults = [];
+    
+    for (var quiz in quizzes) {
+      try {
+        final response = await _performHttpRequest(
+          url: baseUrl + 'result/${quiz.id}/my-result/',
+          requestType: 'GET',
+        );
+        
+        if (response.statusCode == 200) {
+          final result = json.decode(response.body);
+          
+          if (result != null && result['attempted'] != false) {
+            result['quiz_title'] = quiz.title;
+            allResults.add(result as Map<String, dynamic>);
+          }
+        }
+      } catch (e) {
+        debugPrint('Error fetching result for quiz ${quiz.id}: $e');
+        continue;
+      }
+    }
+    
+    debugPrint('Fetched results for ${allResults.length} attempted quizzes');
+    return allResults;
+  } catch (e) {
+    debugPrint('Error fetching student results: $e');
+    return [];
+  }
+}
+
+// Add this method to ApiService class
+Future<Map<String, dynamic>> fetchQuizSuggestions(int quizId, int studentId) async {
+  try {
+    debugPrint('Fetching suggestions for quiz $quizId and student $studentId');
+    final response = await _performHttpRequest(
+      url: baseUrl + 'result/$quizId/student/$studentId/suggestions/',
+      requestType: 'GET',
+    );
+
+    if (response.statusCode == 200) {
+      final suggestions = json.decode(response.body);
+      debugPrint('Successfully fetched suggestions: ${suggestions.toString()}');
+      return suggestions;
+    } else if (response.statusCode == 404) {
+      throw Exception('Quiz result not found');
+    } else {
+      final error = json.decode(response.body);
+      throw Exception(error['error'] ?? 'Failed to fetch suggestions');
+    }
+  } catch (e) {
+    debugPrint('Error fetching suggestions: $e');
+    // Return default suggestions if there's an error
+    return {
+      "study_suggestions": [
+        "Review the course materials thoroughly",
+        "Focus on topics where you made mistakes",
+        "Practice similar questions"
+      ],
+      "key_concepts": [
+        "Review core concepts from the quiz",
+        "Study related materials in detail",
+        "Make notes of difficult topics"
+      ],
+      "youtube_links": [],
+      "practice_exercises": [
+        "Attempt practice questions",
+        "Create your own study materials"
+      ]
+    };
+  }
+}
+
+Future<List<Note>> getRelatedNotes(int quizId) async {
+  try {
+    debugPrint('Fetching related notes for quiz $quizId');
+    final response = await _performHttpRequest(
+      url: baseUrl + 'modules/quizzes/$quizId/related-notes/',
+      requestType: 'GET',
+    );
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      debugPrint('Related notes response: ${data.toString()}');
+      
+      if (data['status'] == 'success' && data['notes'] != null) {
+        final List<dynamic> notesJson = data['notes'];
+        return notesJson.map((json) => Note.fromJson(json)).toList();
+      } else {
+        debugPrint('No notes found in response');
+        return [];
+      }
+    } else {
+      final error = json.decode(response.body);
+      throw Exception(error['message'] ?? 'Failed to fetch related notes');
+    }
+  } catch (e) {
+    debugPrint('Error fetching related notes: $e');
+    return [];
+  }
+}
+
+Future<List<Map<String, dynamic>>> getAllStudentResults(int moduleId) async {
+  try {
+    // First fetch all quizzes in the module
+    await fetchQuizzes(moduleId);
+    final quizzes = DataStore.getQuizzes(moduleId);
+    List<Map<String, dynamic>> allResults = [];
+    
+    // For each quiz, fetch all student results
+    for (var quiz in quizzes) {
+      final response = await _performHttpRequest(
+        url: baseUrl + 'result/${quiz.id}/results/',  // Using the existing results endpoint
+        requestType: 'GET',
+      );
+      
+      if (response.statusCode == 200) {
+        final List<dynamic> quizResults = json.decode(response.body);
+        // Add quiz information to each result
+        for (var result in quizResults) {
+          if (result is Map<String, dynamic>) {
+            result['quiz_title'] = quiz.title;
+            result['quiz_id'] = quiz.id;
+            allResults.add(result);
+          }
+        }
+      }
+    }
+    
+    // Sort results by completion date (most recent first)
+    allResults.sort((a, b) {
+      final DateTime dateA = DateTime.parse(a['completed_at'] ?? '');
+      final DateTime dateB = DateTime.parse(b['completed_at'] ?? '');
+      return dateB.compareTo(dateA);
+    });
+    
+    debugPrint('Fetched ${allResults.length} total student results');
+    return allResults;
+  } catch (e) {
+    debugPrint('Error fetching all student results: $e');
+    return [];
   }
 }
 }
